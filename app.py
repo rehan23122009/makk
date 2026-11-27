@@ -316,8 +316,8 @@ def document_preview(request: Request, doc_id: int):
         return RedirectResponse(url="/workspace", status_code=303)
 
     doc = docs[doc_id]
-    lines = doc["text"].split("\n")
-    preview = "<br>".join(line for line in lines[:15] if line.strip())
+    lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
+    preview = "<br>".join(lines[:15])
 
     return f"""
     <html>
