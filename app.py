@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pypdf import PdfReader
 import io
 
@@ -462,8 +462,44 @@ def document_summary(request: Request, doc_id: int):
             <b>Summary:</b>
             <p>{summary}</p>
         </div>
-
+        <a href="/document/{doc_id}/summary/download"
+           style="display:inline-block; padding:10px 18px; background:#4f8cff; color:white; border-radius:8px; text-decoration:none; margin-bottom:15px;">
+            Download summary
+        </a>
         <a href="/document/{doc_id}" style="color:#4f8cff;">Back to document</a>
       </body>
     </html>
     """
+@app.get("/document/{doc_id}/summary/download")
+def download_summary(request: Request, doc_id: int):
+    user = request.cookies.get("makk_user")
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    docs = workspaces.get(user, [])
+
+    if doc_id < 0 or doc_id >= len(docs):
+        return RedirectResponse(url="/workspace", status_code=303)
+
+    doc = docs[doc_id]
+    lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
+
+    important_lines = []
+    keywords = ["প্রকল্প", "সাক্ষাৎকার", "প্রতিবেদক", "তারিখ", "শিক্ষার্থী", "সৌরভ"]
+
+    for line in lines:
+        if any(keyword in line for keyword in keywords):
+            important_lines.append(line)
+
+    if not important_lines:
+        important_lines = lines[:10]
+
+    summary_text = "\n".join(important_lines[:10])
+
+    return Response(
+        content=summary_text,
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": "attachment; filename=makk-summary.txt"
+        }
+    )
