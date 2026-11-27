@@ -246,7 +246,7 @@ def ask(request: Request, question: str = Form(...)):
         history.append(question)
 
     if len(history) > 10:
-    history.pop(0)
+        history.pop(0)
 
     return f"""
     <html>
