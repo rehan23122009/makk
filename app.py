@@ -64,7 +64,35 @@ def dashboard(request: Request):
       <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
         <h1>MAKK Dashboard</h1>
         <p>Welcome, {user}</p>
-        <p>Next: document upload and AI answers.</p>
+
+        <h2>Ask MAKK</h2>
+        <form action="/ask" method="post">
+          <input name="question" type="text" placeholder="Ask a question" required style="width:100%; padding:12px; margin-bottom:12px;">
+          <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Ask MAKK</button>
+        </form>
+
+        <p style="margin-top:20px;">Next: document upload and AI answers.</p>
+      </body>
+    </html>
+    """
+    @app.post("/ask", response_class=HTMLResponse)
+def ask(request: Request, question: str = Form(...)):
+    user = request.cookies.get("makk_user")
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+    return f"""
+    <html>
+      <head>
+        <title>MAKK Answer</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>MAKK Answer</h1>
+        <p><b>Your question:</b></p>
+        <p>{question}</p>
+        <p><b>MAKK says:</b></p>
+        <p>This is a demo answer. Next we will connect real AI and document upload.</p>
+        <a href="/dashboard" style="color:#4f8cff;">Back to dashboard</a>
       </body>
     </html>
     """
