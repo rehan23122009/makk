@@ -141,6 +141,10 @@ def workspace(request: Request):
         history_html = f"""
         <h2>Recent questions</h2>
         <ul>{history_items}</ul>
+        <a href="/clear-history"
+           style="display:inline-block; padding:8px 16px; background:#ff6b6b; color:white; border-radius:8px; text-decoration:none;">
+            Clear history
+        </a>
         """
 
     return f"""
@@ -556,3 +560,13 @@ def download_summary(request: Request, doc_id: int):
             "Content-Disposition": "attachment; filename=makk-summary.txt"
         }
     )
+@app.get("/clear-history")
+def clear_history(request: Request):
+    user = request.cookies.get("makk_user")
+
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    question_history[user] = []
+
+    return RedirectResponse(url="/workspace", status_code=303)
