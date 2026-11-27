@@ -242,11 +242,11 @@ def ask(request: Request, question: str = Form(...)):
         else:
             answer = "I could not find a matching answer in your documents."
             sources = ""
-                history = question_history.setdefault(user, [])
-    history.append(question)
+        history = question_history.setdefault(user, [])
+        history.append(question)
 
     if len(history) > 10:
-        history.pop(0)
+    history.pop(0)
 
     return f"""
     <html>
