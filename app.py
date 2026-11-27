@@ -30,6 +30,7 @@ def home():
           <input name="password" type="password" required style="width:100%; padding:12px; margin-bottom:12px;">
           <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Login</button>
         </form>
+                <p style="margin-top:20px;"><a href="/pricing" style="color:#4f8cff;">View pricing</a></p>
 
         <p style="margin-top:20px;">Demo account:</p>
         <p>demo@makk.ai</p>
@@ -151,3 +152,35 @@ def ask(request: Request, question: str = Form(...)):
       </body>
     </html>
     """
+
+@app.get("/pricing", response_class=HTMLResponse)
+def pricing():
+    return """
+    <html>
+      <head>
+        <title>MAKK Pricing</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>MAKK Pricing</h1>
+
+        <h2>Free</h2>
+        <p>$0 / month</p>
+        <p>1 document</p>
+        <p>10 questions per day</p>
+
+        <h2>Pro</h2>
+        <p>$19 / month</p>
+        <p>20 documents</p>
+        <p>200 questions per day</p>
+
+        <h2>Business</h2>
+        <p>$99 / month</p>
+        <p>Unlimited documents</p>
+        <p>Unlimited questions</p>
+
+        <a href="/dashboard" style="color:#4f8cff;">Back to dashboard</a>
+      </body>
+    </html>
+    """
+    
