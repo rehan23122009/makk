@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pypdf import PdfReader
@@ -31,7 +30,6 @@ def home():
           <input name="password" type="password" required style="width:100%; padding:12px; margin-bottom:12px;">
           <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Login</button>
         </form>
-                <p style="margin-top:20px;"><a href="/pricing" style="color:#4f8cff;">View pricing</a></p>
 
         <p style="margin-top:20px;">Demo account:</p>
         <p>demo@makk.ai</p>
@@ -82,6 +80,8 @@ def dashboard(request: Request):
           <input name="question" type="text" placeholder="Ask a question" required style="width:100%; padding:12px; margin-bottom:12px;">
           <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Ask MAKK</button>
         </form>
+
+        <p style="margin-top:20px;"><a href="/pricing" style="color:#4f8cff;">View pricing</a></p>
       </body>
     </html>
     """
@@ -124,7 +124,9 @@ def ask(request: Request, question: str = Form(...)):
     user = request.cookies.get("makk_user")
     if not user:
         return RedirectResponse(url="/", status_code=303)
-                count = question_count.get(user, 0)
+
+    count = question_count.get(user, 0)
+
     if count >= 10:
         return HTMLResponse("""
         <html>
@@ -198,4 +200,3 @@ def pricing():
       </body>
     </html>
     """
-    
