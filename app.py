@@ -8,6 +8,7 @@ app = FastAPI()
 users = {"demo@makk.ai": "demo1234"}
 question_count = {}
 workspaces = {}
+question_history = {}
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -241,6 +242,11 @@ def ask(request: Request, question: str = Form(...)):
         else:
             answer = "I could not find a matching answer in your documents."
             sources = ""
+                history = question_history.setdefault(user, [])
+    history.append(question)
+
+    if len(history) > 10:
+        history.pop(0)
 
     return f"""
     <html>
