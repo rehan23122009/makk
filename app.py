@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
 
@@ -15,7 +14,7 @@ def home():
         <title>MAKK Login</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
       </head>
-      <body style="font-family: Arial; background: #0b1220; color: white; padding: 20px;">
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
         <h1>MAKK</h1>
         <p>AI Document Assistant</p>
 
@@ -75,7 +74,8 @@ def dashboard(request: Request):
       </body>
     </html>
     """
-    @app.post("/ask", response_class=HTMLResponse)
+
+@app.post("/ask", response_class=HTMLResponse)
 def ask(request: Request, question: str = Form(...)):
     user = request.cookies.get("makk_user")
     if not user:
