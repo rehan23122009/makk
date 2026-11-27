@@ -117,7 +117,7 @@ def workspace(request: Request):
 
     for i, doc in enumerate(docs):
         doc_list += f"""
-        <p>{i + 1}. {doc['name']} — {len(doc['text'].split())} words
+        <p>{i + 1}. <a href="/document/{i}" style="color:#4f8cff;">{doc['name']}</a> — {len(doc['text'].split())} words
         <a href="/delete/{i}" style="color:#ff6b6b;">Delete</a>
         </p>
         """
@@ -304,3 +304,36 @@ def delete_document(request: Request, doc_id: int):
         workspaces[user].pop(doc_id)
 
     return RedirectResponse(url="/workspace", status_code=303)
+@app.get("/document/{doc_id}", response_class=HTMLResponse)
+def document_preview(request: Request, doc_id: int):
+    user = request.cookies.get("makk_user")
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    docs = workspaces.get(user, [])
+
+    if doc_id < 0 or doc_id >= len(docs):
+        return RedirectResponse(url="/workspace", status_code=303)
+
+    doc = docs[doc_id]
+    lines = doc["text"].split("\n")
+    preview = "<br>".join(line for line in lines[:15] if line.strip())
+
+    return f"""
+    <html>
+      <head>
+        <title>MAKK Document</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>Document preview</h1>
+        <p><b>File:</b> {doc['name']}</p>
+        <p><b>Words:</b> {len(doc['text'].split())}</p>
+
+        <h2>First 15 lines</h2>
+        <p>{preview}</p>
+
+        <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
+      </body>
+    </html>
+    """
