@@ -5,11 +5,9 @@ import io
 
 app = FastAPI()
 
-DEMO_EMAIL = "demo@makk.ai"
-DEMO_PASSWORD = "demo1234"
-
-documents = {}
+users = {"demo@makk.ai": "demo1234"}
 question_count = {}
+workspaces = {}
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -21,7 +19,7 @@ def home():
       </head>
       <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
         <h1>MAKK</h1>
-        <p>AI Document Assistant</p>
+        <p>Your company AI knowledge assistant</p>
 
         <form action="/login" method="post">
           <p>Email</p>
@@ -34,14 +32,16 @@ def home():
         <p style="margin-top:20px;">Demo account:</p>
         <p>demo@makk.ai</p>
         <p>demo1234</p>
+
+        <p style="margin-top:20px;"><a href="/signup" style="color:#4f8cff;">Create account</a></p>
       </body>
     </html>
     """
 
 @app.post("/login")
 def login(email: str = Form(...), password: str = Form(...)):
-    if email == DEMO_EMAIL and password == DEMO_PASSWORD:
-        response = RedirectResponse(url="/dashboard", status_code=303)
+    if users.get(email) == password:
+        response = RedirectResponse(url="/workspace", status_code=303)
         response.set_cookie(key="makk_user", value=email)
         return response
     return HTMLResponse("""
@@ -54,30 +54,94 @@ def login(email: str = Form(...), password: str = Form(...)):
     </html>
     """)
 
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request):
-    user = request.cookies.get("makk_user")
-    if not user:
-        return RedirectResponse(url="/", status_code=303)
-    return f"""
+@app.get("/signup", response_class=HTMLResponse)
+def signup_page():
+    return """
     <html>
       <head>
-        <title>MAKK Dashboard</title>
+        <title>MAKK Signup</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
       </head>
       <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
-        <h1>MAKK Dashboard</h1>
+        <h1>Create MAKK account</h1>
+
+        <form action="/signup" method="post">
+          <p>Email</p>
+          <input name="email" type="email" required style="width:100%; padding:12px; margin-bottom:12px;">
+          <p>Password</p>
+          <input name="password" type="password" required style="width:100%; padding:12px; margin-bottom:12px;">
+          <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Create account</button>
+        </form>
+
+        <a href="/" style="color:#4f8cff;">Back to login</a>
+      </body>
+    </html>
+    """
+
+@app.post("/signup")
+def signup(email: str = Form(...), password: str = Form(...)):
+    if email in users:
+        return HTMLResponse("""
+        <html>
+          <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+            <h2>Account already exists</h2>
+            <a href="/signup" style="color:#4f8cff;">Try another email</a>
+          </body>
+        </html>
+        """)
+
+    users[email] = password
+    workspaces[email] = []
+
+    return HTMLResponse("""
+    <html>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h2>Account created</h2>
+        <p>You can now login.</p>
+        <a href="/" style="color:#4f8cff;">Login</a>
+      </body>
+    </html>
+    """)
+
+@app.get("/workspace", response_class=HTMLResponse)
+def workspace(request: Request):
+    user = request.cookies.get("makk_user")
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    if user not in workspaces:
+        workspaces[user] = []
+
+    docs = workspaces[user]
+    doc_list = ""
+
+    for i, doc in enumerate(docs):
+        doc_list += f"""
+        <p>{i + 1}. {doc['name']} — {len(doc['text'].split())} words</p>
+        """
+
+    return f"""
+    <html>
+      <head>
+        <title>MAKK Workspace</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>MAKK Enterprise Workspace</h1>
         <p>Welcome, {user}</p>
 
-        <h2>Upload document</h2>
+        <h2>Your documents</h2>
+        {doc_list if doc_list else "<p>No documents uploaded yet.</p>"}
+
+        <h2>Upload documents</h2>
         <form action="/upload" method="post" enctype="multipart/form-data">
-          <input name="file" type="file" accept=".pdf,.txt" required style="width:100%; padding:12px; margin-bottom:12px;">
+          <input name="files" type="file" accept=".pdf,.txt" multiple required style="width:100%; padding:12px; margin-bottom:12px;">
           <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Upload</button>
         </form>
 
         <h2>Ask MAKK</h2>
         <form action="/ask" method="post">
-          <input name="question" type="text" placeholder="Ask a question" required style="width:100%; padding:12px; margin-bottom:12px;">
+          <input name="question" type="text" placeholder="Ask about all documents" required style="width:100%; padding:12px; margin-bottom:12px;">
           <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Ask MAKK</button>
         </form>
 
@@ -87,21 +151,32 @@ def dashboard(request: Request):
     """
 
 @app.post("/upload", response_class=HTMLResponse)
-def upload(request: Request, file: UploadFile = File(...)):
+def upload(request: Request, files: list[UploadFile] = File(...)):
     user = request.cookies.get("makk_user")
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    filename = file.filename
-    content = file.file.read()
+    if user not in workspaces:
+        workspaces[user] = []
 
-    if filename.lower().endswith(".pdf"):
-        reader = PdfReader(io.BytesIO(content))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    else:
-        text = content.decode("utf-8", errors="ignore")
+    added = 0
 
-    documents[user] = text
+    for file in files:
+        filename = file.filename
+        content = file.file.read()
+
+        if filename.lower().endswith(".pdf"):
+            reader = PdfReader(io.BytesIO(content))
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        else:
+            text = content.decode("utf-8", errors="ignore")
+
+        workspaces[user].append({
+            "name": filename,
+            "text": text
+        })
+
+        added += 1
 
     return f"""
     <html>
@@ -110,11 +185,9 @@ def upload(request: Request, file: UploadFile = File(...)):
         <meta name="viewport" content="width=device-width, initial-scale=1">
       </head>
       <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
-        <h1>Document uploaded</h1>
-        <p><b>File:</b> {filename}</p>
-        <p><b>Words found:</b> {len(text.split())}</p>
-        <p>MAKK can now answer questions from this document.</p>
-        <a href="/dashboard" style="color:#4f8cff;">Back to dashboard</a>
+        <h1>{added} document(s) uploaded</h1>
+        <p>MAKK can now answer questions from all your documents.</p>
+        <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
       </body>
     </html>
     """
@@ -133,7 +206,7 @@ def ask(request: Request, question: str = Form(...)):
           <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
             <h1>Daily limit reached</h1>
             <p>You have used 10 questions today.</p>
-            <p>Upgrade to Pro for more questions.</p>
+            <p>Upgrade for more questions.</p>
             <a href="/pricing" style="color:#4f8cff;">View pricing</a>
           </body>
         </html>
@@ -141,17 +214,31 @@ def ask(request: Request, question: str = Form(...)):
 
     question_count[user] = count + 1
 
-    text = documents.get(user, "")
+    docs = workspaces.get(user, [])
 
-    if not text:
-        answer = "Please upload a document first."
+    if not docs:
+        answer = "Please upload documents first."
+        sources = ""
     else:
         words = question.lower().split()
-        matches = [line for line in text.split("\n") if any(word in line.lower() for word in words)]
+        matches = []
+
+        for doc in docs:
+            for line in doc["text"].split("\n"):
+                if any(word in line.lower() for word in words):
+                    matches.append({
+                        "file": doc["name"],
+                        "line": line
+                    })
+
         if matches:
-            answer = "<br>".join(matches[:5])
+            answer = "<br><br>".join(
+                f"<b>{m['file']}</b><br>{m['line']}" for m in matches[:5]
+            )
+            sources = "<br>".join(sorted(set(m["file"] for m in matches[:5])))
         else:
-            answer = "I could not find a matching line in your document."
+            answer = "I could not find a matching answer in your documents."
+            sources = ""
 
     return f"""
     <html>
@@ -163,9 +250,14 @@ def ask(request: Request, question: str = Form(...)):
         <h1>MAKK Answer</h1>
         <p><b>Your question:</b></p>
         <p>{question}</p>
+
         <p><b>MAKK says:</b></p>
         <p>{answer}</p>
-        <a href="/dashboard" style="color:#4f8cff;">Back to dashboard</a>
+
+        <p><b>Sources:</b></p>
+        <p>{sources}</p>
+
+        <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
       </body>
     </html>
     """
@@ -183,20 +275,20 @@ def pricing():
 
         <h2>Free</h2>
         <p>$0 / month</p>
-        <p>1 document</p>
+        <p>3 documents</p>
         <p>10 questions per day</p>
 
-        <h2>Pro</h2>
-        <p>$19 / month</p>
-        <p>20 documents</p>
-        <p>200 questions per day</p>
+        <h2>Team</h2>
+        <p>$9 / user / month</p>
+        <p>Unlimited documents</p>
+        <p>500 questions per user / month</p>
 
         <h2>Business</h2>
-        <p>$99 / month</p>
-        <p>Unlimited documents</p>
-        <p>Unlimited questions</p>
+        <p>$19 / user / month</p>
+        <p>Advanced AI</p>
+        <p>Permissions and admin controls</p>
 
-        <a href="/dashboard" style="color:#4f8cff;">Back to dashboard</a>
+        <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
       </body>
     </html>
     """
