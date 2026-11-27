@@ -318,6 +318,7 @@ def document_preview(request: Request, doc_id: int):
     doc = docs[doc_id]
     lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
     preview = "<br>".join(lines[:15])
+        answer_html = ""
 
     return f"""
     <html>
@@ -330,8 +331,88 @@ def document_preview(request: Request, doc_id: int):
         <p><b>File:</b> {doc['name']}</p>
         <p><b>Words:</b> {len(doc['text'].split())}</p>
 
+                <h2>First 15 lines</h2>
+        <p>{preview}</p>
+
+        <h2>Ask about this document</h2>
+        <form method="post" action="/document/{doc_id}/ask">
+            <input type="text" name="question" placeholder="Ask about this document" required
+                   style="width:100%; padding:10px; margin:8px 0;">
+            <button type="submit"
+                    style="padding:10px 18px; background:#4f8cff; color:white; border:none; border-radius:8px;">
+                Ask
+            </button>
+        </form>
+
+        {answer_html}
+
+        <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
+      </body>
+    </html>
+    """
+@app.post("/document/{doc_id}/ask", response_class=HTMLResponse)
+def ask_document(request: Request, doc_id: int, question: str = Form(...)):
+    user = request.cookies.get("makk_user")
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    docs = workspaces.get(user, [])
+
+    if doc_id < 0 or doc_id >= len(docs):
+        return RedirectResponse(url="/workspace", status_code=303)
+
+    doc = docs[doc_id]
+    text = doc["text"]
+    lines = text.split("\n")
+
+    words = question.lower().split()
+    matches = []
+
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if any(word in line_lower for word in words if len(word) > 2):
+            matches.append(line.strip())
+
+    if matches:
+        answer = "<br>".join(matches[:10])
+    else:
+        answer = "No matching information found in this document."
+
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    preview = "<br>".join(lines[:15])
+
+    answer_html = f"""
+    <div style="background:#16233d; padding:15px; border-radius:10px; margin-top:15px;">
+        <b>Answer:</b>
+        <p>{answer}</p>
+    </div>
+    """
+
+    return f"""
+    <html>
+      <head>
+        <title>MAKK Document</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>Document preview</h1>
+        <p><b>File:</b> {doc['name']}</p>
+        <p><b>Words:</b> {len(text.split())}</p>
+
         <h2>First 15 lines</h2>
         <p>{preview}</p>
+
+        <h2>Ask about this document</h2>
+        <form method="post" action="/document/{doc_id}/ask">
+            <input type="text" name="question" placeholder="Ask about this document" required
+                   style="width:100%; padding:10px; margin:8px 0;">
+            <button type="submit"
+                    style="padding:10px 18px; background:#4f8cff; color:white; border:none; border-radius:8px;">
+                Ask
+            </button>
+        </form>
+
+        {answer_html}
 
         <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
       </body>
