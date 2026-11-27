@@ -10,6 +10,7 @@ DEMO_EMAIL = "demo@makk.ai"
 DEMO_PASSWORD = "demo1234"
 
 documents = {}
+question_count = {}
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -123,6 +124,20 @@ def ask(request: Request, question: str = Form(...)):
     user = request.cookies.get("makk_user")
     if not user:
         return RedirectResponse(url="/", status_code=303)
+            count = question_count.get(user, 0)
+    if count >= 10:
+        return HTMLResponse("""
+        <html>
+          <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+            <h1>Daily limit reached</h1>
+            <p>You have used 10 questions today.</p>
+            <p>Upgrade to Pro for more questions.</p>
+            <a href="/pricing" style="color:#4f8cff;">View pricing</a>
+          </body>
+        </html>
+        """)
+
+    question_count[user] = count + 1
 
     text = documents.get(user, "")
 
