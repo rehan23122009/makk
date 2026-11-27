@@ -10,6 +10,7 @@ question_count = {}
 workspaces = {}
 question_history = {}
 
+
 @app.get("/", response_class=HTMLResponse)
 def home():
     return """
@@ -39,12 +40,14 @@ def home():
     </html>
     """
 
+
 @app.post("/login")
 def login(email: str = Form(...), password: str = Form(...)):
     if users.get(email) == password:
         response = RedirectResponse(url="/workspace", status_code=303)
         response.set_cookie(key="makk_user", value=email)
         return response
+
     return HTMLResponse("""
     <html>
       <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
@@ -54,6 +57,7 @@ def login(email: str = Form(...), password: str = Form(...)):
       </body>
     </html>
     """)
+
 
 @app.get("/signup", response_class=HTMLResponse)
 def signup_page():
@@ -78,6 +82,7 @@ def signup_page():
       </body>
     </html>
     """
+
 
 @app.post("/signup")
 def signup(email: str = Form(...), password: str = Form(...)):
@@ -104,9 +109,11 @@ def signup(email: str = Form(...), password: str = Form(...)):
     </html>
     """)
 
+
 @app.get("/workspace", response_class=HTMLResponse)
 def workspace(request: Request):
     user = request.cookies.get("makk_user")
+
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
@@ -121,6 +128,19 @@ def workspace(request: Request):
         <p>{i + 1}. <a href="/document/{i}" style="color:#4f8cff;">{doc['name']}</a> — {len(doc['text'].split())} words
         <a href="/delete/{i}" style="color:#ff6b6b;">Delete</a>
         </p>
+        """
+
+    history = question_history.get(user, [])
+    history_items = ""
+    history_html = ""
+
+    for question in reversed(history):
+        history_items += f"<li>{question}</li>"
+
+    if history_items:
+        history_html = f"""
+        <h2>Recent questions</h2>
+        <ul>{history_items}</ul>
         """
 
     return f"""
@@ -148,14 +168,18 @@ def workspace(request: Request):
           <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Ask MAKK</button>
         </form>
 
+        {history_html}
+
         <p style="margin-top:20px;"><a href="/pricing" style="color:#4f8cff;">View pricing</a></p>
       </body>
     </html>
     """
 
+
 @app.post("/upload", response_class=HTMLResponse)
 def upload(request: Request, files: list[UploadFile] = File(...)):
     user = request.cookies.get("makk_user")
+
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
@@ -195,9 +219,11 @@ def upload(request: Request, files: list[UploadFile] = File(...)):
     </html>
     """
 
+
 @app.post("/ask", response_class=HTMLResponse)
 def ask(request: Request, question: str = Form(...)):
     user = request.cookies.get("makk_user")
+
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
@@ -242,8 +268,9 @@ def ask(request: Request, question: str = Form(...)):
         else:
             answer = "I could not find a matching answer in your documents."
             sources = ""
-        history = question_history.setdefault(user, [])
-        history.append(question)
+
+    history = question_history.setdefault(user, [])
+    history.append(question)
 
     if len(history) > 10:
         history.pop(0)
@@ -269,6 +296,7 @@ def ask(request: Request, question: str = Form(...)):
       </body>
     </html>
     """
+
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing():
@@ -300,9 +328,12 @@ def pricing():
       </body>
     </html>
     """
+
+
 @app.get("/delete/{doc_id}")
 def delete_document(request: Request, doc_id: int):
     user = request.cookies.get("makk_user")
+
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
@@ -310,9 +341,12 @@ def delete_document(request: Request, doc_id: int):
         workspaces[user].pop(doc_id)
 
     return RedirectResponse(url="/workspace", status_code=303)
+
+
 @app.get("/document/{doc_id}", response_class=HTMLResponse)
 def document_preview(request: Request, doc_id: int):
     user = request.cookies.get("makk_user")
+
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
@@ -325,7 +359,6 @@ def document_preview(request: Request, doc_id: int):
     lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
     preview = "<br>".join(lines[:15])
     answer_html = ""
-        
 
     return f"""
     <html>
@@ -338,7 +371,7 @@ def document_preview(request: Request, doc_id: int):
         <p><b>File:</b> {doc['name']}</p>
         <p><b>Words:</b> {len(doc['text'].split())}</p>
 
-                <h2>First 15 lines</h2>
+        <h2>First 15 lines</h2>
         <p>{preview}</p>
 
         <h2>Ask about this document</h2>
@@ -352,17 +385,22 @@ def document_preview(request: Request, doc_id: int):
         </form>
 
         {answer_html}
+
         <a href="/document/{doc_id}/summary"
            style="display:inline-block; padding:10px 18px; background:#22c55e; color:white; border-radius:8px; text-decoration:none;">
             Summarize
         </a>
+
         <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
       </body>
     </html>
     """
+
+
 @app.post("/document/{doc_id}/ask", response_class=HTMLResponse)
 def ask_document(request: Request, doc_id: int, question: str = Form(...)):
     user = request.cookies.get("makk_user")
+
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
@@ -378,8 +416,9 @@ def ask_document(request: Request, doc_id: int, question: str = Form(...)):
     words = question.lower().split()
     matches = []
 
-    for i, line in enumerate(lines):
+    for line in lines:
         line_lower = line.lower()
+
         if any(word in line_lower for word in words if len(word) > 2):
             matches.append(line.strip())
 
@@ -428,9 +467,12 @@ def ask_document(request: Request, doc_id: int, question: str = Form(...)):
       </body>
     </html>
     """
+
+
 @app.get("/document/{doc_id}/summary", response_class=HTMLResponse)
 def document_summary(request: Request, doc_id: int):
     user = request.cookies.get("makk_user")
+
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
@@ -468,17 +510,22 @@ def document_summary(request: Request, doc_id: int):
             <b>Summary:</b>
             <p>{summary}</p>
         </div>
+
         <a href="/document/{doc_id}/summary/download"
            style="display:inline-block; padding:10px 18px; background:#4f8cff; color:white; border-radius:8px; text-decoration:none; margin-bottom:15px;">
             Download summary
         </a>
+
         <a href="/document/{doc_id}" style="color:#4f8cff;">Back to document</a>
       </body>
     </html>
     """
+
+
 @app.get("/document/{doc_id}/summary/download")
 def download_summary(request: Request, doc_id: int):
     user = request.cookies.get("makk_user")
+
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
