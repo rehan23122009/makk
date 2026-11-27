@@ -346,7 +346,10 @@ def document_preview(request: Request, doc_id: int):
         </form>
 
         {answer_html}
-
+        <a href="/document/{doc_id}/summary"
+           style="display:inline-block; padding:10px 18px; background:#22c55e; color:white; border-radius:8px; text-decoration:none;">
+            Summarize
+        </a>
         <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
       </body>
     </html>
@@ -416,6 +419,51 @@ def ask_document(request: Request, doc_id: int, question: str = Form(...)):
         {answer_html}
 
         <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
+      </body>
+    </html>
+    """
+@app.get("/document/{doc_id}/summary", response_class=HTMLResponse)
+def document_summary(request: Request, doc_id: int):
+    user = request.cookies.get("makk_user")
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    docs = workspaces.get(user, [])
+
+    if doc_id < 0 or doc_id >= len(docs):
+        return RedirectResponse(url="/workspace", status_code=303)
+
+    doc = docs[doc_id]
+    lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
+
+    important_lines = []
+    keywords = ["প্রকল্প", "সাক্ষাৎকার", "প্রতিবেদক", "তারিখ", "শিক্ষার্থী", "সৌরভ"]
+
+    for line in lines:
+        if any(keyword in line for keyword in keywords):
+            important_lines.append(line)
+
+    if not important_lines:
+        important_lines = lines[:10]
+
+    summary = "<br>".join(important_lines[:10])
+
+    return f"""
+    <html>
+      <head>
+        <title>MAKK Summary</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>Document summary</h1>
+        <p><b>File:</b> {doc['name']}</p>
+
+        <div style="background:#16233d; padding:15px; border-radius:10px; margin-top:15px;">
+            <b>Summary:</b>
+            <p>{summary}</p>
+        </div>
+
+        <a href="/document/{doc_id}" style="color:#4f8cff;">Back to document</a>
       </body>
     </html>
     """
