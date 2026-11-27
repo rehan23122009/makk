@@ -124,7 +124,7 @@ def ask(request: Request, question: str = Form(...)):
     user = request.cookies.get("makk_user")
     if not user:
         return RedirectResponse(url="/", status_code=303)
-            count = question_count.get(user, 0)
+                count = question_count.get(user, 0)
     if count >= 10:
         return HTMLResponse("""
         <html>
