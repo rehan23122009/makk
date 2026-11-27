@@ -1,10 +1,15 @@
-from fastapi import FastAPI, Form, Request
+
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pypdf import PdfReader
+import io
 
 app = FastAPI()
 
 DEMO_EMAIL = "demo@makk.ai"
 DEMO_PASSWORD = "demo1234"
+
+documents = {}
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -64,13 +69,50 @@ def dashboard(request: Request):
         <h1>MAKK Dashboard</h1>
         <p>Welcome, {user}</p>
 
+        <h2>Upload document</h2>
+        <form action="/upload" method="post" enctype="multipart/form-data">
+          <input name="file" type="file" accept=".pdf,.txt" required style="width:100%; padding:12px; margin-bottom:12px;">
+          <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Upload</button>
+        </form>
+
         <h2>Ask MAKK</h2>
         <form action="/ask" method="post">
           <input name="question" type="text" placeholder="Ask a question" required style="width:100%; padding:12px; margin-bottom:12px;">
           <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Ask MAKK</button>
         </form>
+      </body>
+    </html>
+    """
 
-        <p style="margin-top:20px;">Next: document upload and AI answers.</p>
+@app.post("/upload", response_class=HTMLResponse)
+def upload(request: Request, file: UploadFile = File(...)):
+    user = request.cookies.get("makk_user")
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    filename = file.filename
+    content = file.file.read()
+
+    if filename.lower().endswith(".pdf"):
+        reader = PdfReader(io.BytesIO(content))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    else:
+        text = content.decode("utf-8", errors="ignore")
+
+    documents[user] = text
+
+    return f"""
+    <html>
+      <head>
+        <title>MAKK Upload</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>Document uploaded</h1>
+        <p><b>File:</b> {filename}</p>
+        <p><b>Words found:</b> {len(text.split())}</p>
+        <p>MAKK can now answer questions from this document.</p>
+        <a href="/dashboard" style="color:#4f8cff;">Back to dashboard</a>
       </body>
     </html>
     """
@@ -80,6 +122,19 @@ def ask(request: Request, question: str = Form(...)):
     user = request.cookies.get("makk_user")
     if not user:
         return RedirectResponse(url="/", status_code=303)
+
+    text = documents.get(user, "")
+
+    if not text:
+        answer = "Please upload a document first."
+    else:
+        words = question.lower().split()
+        matches = [line for line in text.split("\n") if any(word in line.lower() for word in words)]
+        if matches:
+            answer = "<br>".join(matches[:5])
+        else:
+            answer = "I could not find a matching line in your document."
+
     return f"""
     <html>
       <head>
@@ -91,7 +146,7 @@ def ask(request: Request, question: str = Form(...)):
         <p><b>Your question:</b></p>
         <p>{question}</p>
         <p><b>MAKK says:</b></p>
-        <p>This is a demo answer. Next we will connect real AI and document upload.</p>
+        <p>{answer}</p>
         <a href="/dashboard" style="color:#4f8cff;">Back to dashboard</a>
       </body>
     </html>
