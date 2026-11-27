@@ -318,7 +318,7 @@ def document_preview(request: Request, doc_id: int):
     doc = docs[doc_id]
     lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
     preview = "<br>".join(lines[:15])
-        answer_html = ""
+    answer_html = ""
         
 
     return f"""
