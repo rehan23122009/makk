@@ -117,7 +117,9 @@ def workspace(request: Request):
 
     for i, doc in enumerate(docs):
         doc_list += f"""
-        <p>{i + 1}. {doc['name']} — {len(doc['text'].split())} words</p>
+        <p>{i + 1}. {doc['name']} — {len(doc['text'].split())} words
+        <a href="/delete/{i}" style="color:#ff6b6b;">Delete</a>
+        </p>
         """
 
     return f"""
@@ -292,3 +294,13 @@ def pricing():
       </body>
     </html>
     """
+@app.get("/delete/{doc_id}")
+def delete_document(request: Request, doc_id: int):
+    user = request.cookies.get("makk_user")
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    if user in workspaces and 0 <= doc_id < len(workspaces[user]):
+        workspaces[user].pop(doc_id)
+
+    return RedirectResponse(url="/workspace", status_code=303)
