@@ -166,6 +166,7 @@ def workspace(request: Request):
         <p>Welcome, {user}</p>
 
         <h2>Your documents</h2>
+        <p>{len(docs)} / 3 documents used on Free plan</p>
         {doc_list if doc_list else "<p>No documents uploaded yet.</p>"}
 
         <h2>Upload documents</h2>
@@ -205,6 +206,18 @@ def upload(request: Request, files: list[UploadFile] = File(...)):
 
     if user not in workspaces:
         workspaces[user] = []
+
+    if len(workspaces[user]) >= 3:
+        return HTMLResponse("""
+        <html>
+          <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+            <h1>Free plan limit reached</h1>
+            <p>You can upload up to 3 documents on the Free plan.</p>
+            <p>Upgrade to upload unlimited documents.</p>
+            <a href="/pricing" style="color:#4f8cff;">View pricing</a>
+          </body>
+        </html>
+        """)
 
     added = 0
 
