@@ -1,14 +1,189 @@
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pypdf import PdfReader
+import hashlib
 import io
+import os
+import secrets
+import sqlite3
+from datetime import date
 
 app = FastAPI()
 
-users = {"demo@makk.ai": "demo1234"}
-question_count = {}
-workspaces = {}
-question_history = {}
+DB_PATH = "makk.db"
+
+
+def get_db():
+    connection = sqlite3.connect(DB_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def init_db():
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            sources TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage (
+            user_id INTEGER NOT NULL,
+            usage_date TEXT NOT NULL,
+            question_count INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, usage_date)
+        )
+    """)
+
+    connection.commit()
+    connection.close()
+
+
+def hash_password(password):
+    salt = secrets.token_hex(16)
+    password_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        100000
+    ).hex()
+
+    return f"{salt}:{password_hash}"
+
+
+def verify_password(password, stored_password):
+    try:
+        salt, password_hash = stored_password.split(":")
+        new_hash = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt.encode("utf-8"),
+            100000
+        ).hex()
+
+        return secrets.compare_digest(new_hash, password_hash)
+    except Exception:
+        return False
+
+
+def get_current_user(request):
+    token = request.cookies.get("makk_session")
+
+    if not token:
+        return None
+
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT users.id, users.email
+        FROM sessions
+        JOIN users ON users.id = sessions.user_id
+        WHERE sessions.token = ?
+    """, (token,))
+
+    user = cursor.fetchone()
+    connection.close()
+
+    return user
+
+
+def get_question_count(user_id):
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT question_count
+        FROM usage
+        WHERE user_id = ? AND usage_date = ?
+    """, (user_id, date.today().isoformat()))
+
+    result = cursor.fetchone()
+    connection.close()
+
+    return result["question_count"] if result else 0
+
+
+def increase_question_count(user_id):
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        INSERT INTO usage (user_id, usage_date, question_count)
+        VALUES (?, ?, 1)
+        ON CONFLICT(user_id, usage_date)
+        DO UPDATE SET question_count = question_count + 1
+    """, (user_id, date.today().isoformat()))
+
+    connection.commit()
+    connection.close()
+
+
+def search_text(text, question):
+    words = [
+        word for word in question.lower().split()
+        if len(word) > 2
+    ]
+
+    if not words:
+        return []
+
+    matches = []
+
+    for line in text.split("\n"):
+        line_lower = line.lower()
+
+        if any(word in line_lower for word in words):
+            matches.append(line.strip())
+
+    return matches
+
+
+def make_answer(matches):
+    if not matches:
+        return "I could not find a matching answer in your documents."
+
+    return "<br><br>".join(matches[:10])
+
+
+@app.on_event("startup")
+def startup():
+    init_db()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -51,20 +226,51 @@ def home():
 
 @app.post("/login")
 def login(email: str = Form(...), password: str = Form(...)):
-    if users.get(email) == password:
-        response = RedirectResponse(url="/workspace", status_code=303)
-        response.set_cookie(key="makk_user", value=email)
-        return response
+    connection = get_db()
+    cursor = connection.cursor()
 
-    return HTMLResponse("""
-    <html>
-      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
-        <h2>Login failed</h2>
-        <p>Wrong email or password.</p>
-        <a href="/" style="color:#4f8cff;">Try again</a>
-      </body>
-    </html>
-    """)
+    cursor.execute("""
+        SELECT id, email, password_hash
+        FROM users
+        WHERE email = ?
+    """, (email,))
+
+    user = cursor.fetchone()
+    connection.close()
+
+    if not user or not verify_password(password, user["password_hash"]):
+        return HTMLResponse("""
+        <html>
+          <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+            <h2>Login failed</h2>
+            <p>Wrong email or password.</p>
+            <a href="/" style="color:#4f8cff;">Try again</a>
+          </body>
+        </html>
+        """)
+
+    token = secrets.token_hex(32)
+
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        INSERT INTO sessions (token, user_id)
+        VALUES (?, ?)
+    """, (token, user["id"]))
+
+    connection.commit()
+    connection.close()
+
+    response = RedirectResponse(url="/workspace", status_code=303)
+    response.set_cookie(
+        key="makk_session",
+        value=token,
+        httponly=True,
+        samesite="lax"
+    )
+
+    return response
 
 
 @app.get("/signup", response_class=HTMLResponse)
@@ -82,7 +288,7 @@ def signup_page():
           <p>Email</p>
           <input name="email" type="email" required style="width:100%; padding:12px; margin-bottom:12px;">
           <p>Password</p>
-          <input name="password" type="password" required style="width:100%; padding:12px; margin-bottom:12px;">
+          <input name="password" type="password" minlength="8" required style="width:100%; padding:12px; margin-bottom:12px;">
           <button type="submit" style="width:100%; padding:12px; background:#4f8cff; color:white; border:none; border-radius:8px;">Create account</button>
         </form>
 
@@ -94,7 +300,20 @@ def signup_page():
 
 @app.post("/signup")
 def signup(email: str = Form(...), password: str = Form(...)):
-    if email in users:
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT id
+        FROM users
+        WHERE email = ?
+    """, (email,))
+
+    existing_user = cursor.fetchone()
+
+    if existing_user:
+        connection.close()
+
         return HTMLResponse("""
         <html>
           <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
@@ -104,8 +323,13 @@ def signup(email: str = Form(...), password: str = Form(...)):
         </html>
         """)
 
-    users[email] = password
-    workspaces[email] = []
+    cursor.execute("""
+        INSERT INTO users (email, password_hash)
+        VALUES (?, ?)
+    """, (email, hash_password(password)))
+
+    connection.commit()
+    connection.close()
 
     return HTMLResponse("""
     <html>
@@ -120,32 +344,58 @@ def signup(email: str = Form(...), password: str = Form(...)):
 
 @app.get("/workspace", response_class=HTMLResponse)
 def workspace(request: Request):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    if user not in workspaces:
-        workspaces[user] = []
+    connection = get_db()
+    cursor = connection.cursor()
 
-    docs = workspaces[user]
+    cursor.execute("""
+        SELECT id, name, text, created_at
+        FROM documents
+        WHERE user_id = ?
+        ORDER BY id DESC
+    """, (user["id"],))
+
+    docs = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT question, answer, sources, created_at
+        FROM questions
+        WHERE user_id = ?
+        ORDER BY id DESC
+        LIMIT 10
+    """, (user["id"],))
+
+    history = cursor.fetchall()
+    connection.close()
+
     doc_list = ""
 
-    for i, doc in enumerate(docs):
+    for doc in docs:
         doc_list += f"""
-        <p>{i + 1}. <a href="/document/{i}" style="color:#4f8cff;">{doc['name']}</a> — {len(doc['text'].split())} words
-        <a href="/delete/{i}" style="color:#ff6b6b;">Delete</a>
+        <p>{doc['name']} — {len(doc['text'].split())} words
+        <a href="/document/{doc['id']}" style="color:#4f8cff;">Open</a>
+        |
+        <a href="/delete/{doc['id']}" style="color:#ff6b6b;">Delete</a>
         </p>
         """
 
-    history = question_history.get(user, [])
-    history_items = ""
     history_html = ""
 
-    for question in reversed(history):
-        history_items += f"<li>{question}</li>"
+    if history:
+        history_items = ""
 
-    if history_items:
+        for item in history:
+            history_items += f"""
+            <li>
+                <b>{item['question']}</b><br>
+                {item['answer'][:200]}...
+            </li>
+            """
+
         history_html = f"""
         <h2>Recent questions</h2>
         <ul>{history_items}</ul>
@@ -155,6 +405,10 @@ def workspace(request: Request):
         </a>
         """
 
+    used = len(docs)
+    remaining = max(0, 3 - used)
+    questions_used = get_question_count(user["id"])
+
     return f"""
     <html>
       <head>
@@ -163,10 +417,13 @@ def workspace(request: Request):
       </head>
       <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
         <h1>MAKK Enterprise Workspace</h1>
-        <p>Welcome, {user}</p>
+        <p>Welcome, {user['email']}</p>
+
+        <h2>Your plan</h2>
+        <p>Documents: {used} / 3</p>
+        <p>Questions used today: {questions_used} / 10</p>
 
         <h2>Your documents</h2>
-        <p>{len(docs)} / 3 documents used on Free plan</p>
         {doc_list if doc_list else "<p>No documents uploaded yet.</p>"}
 
         <h2>Upload documents</h2>
@@ -199,15 +456,25 @@ def workspace(request: Request):
 
 @app.post("/upload", response_class=HTMLResponse)
 def upload(request: Request, files: list[UploadFile] = File(...)):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    if user not in workspaces:
-        workspaces[user] = []
+    connection = get_db()
+    cursor = connection.cursor()
 
-    if len(workspaces[user]) >= 3:
+    cursor.execute("""
+        SELECT COUNT(*) AS total
+        FROM documents
+        WHERE user_id = ?
+    """, (user["id"],))
+
+    current_count = cursor.fetchone()["total"]
+
+    if current_count >= 3:
+        connection.close()
+
         return HTMLResponse("""
         <html>
           <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
@@ -219,9 +486,13 @@ def upload(request: Request, files: list[UploadFile] = File(...)):
         </html>
         """)
 
+    allowed = 3 - current_count
     added = 0
 
     for file in files:
+        if added >= allowed:
+            break
+
         filename = file.filename
         content = file.file.read()
 
@@ -231,12 +502,15 @@ def upload(request: Request, files: list[UploadFile] = File(...)):
         else:
             text = content.decode("utf-8", errors="ignore")
 
-        workspaces[user].append({
-            "name": filename,
-            "text": text
-        })
+        cursor.execute("""
+            INSERT INTO documents (user_id, name, text)
+            VALUES (?, ?, ?)
+        """, (user["id"], filename, text))
 
         added += 1
+
+    connection.commit()
+    connection.close()
 
     return f"""
     <html>
@@ -255,58 +529,62 @@ def upload(request: Request, files: list[UploadFile] = File(...)):
 
 @app.post("/ask", response_class=HTMLResponse)
 def ask(request: Request, question: str = Form(...)):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    count = question_count.get(user, 0)
-
-    if count >= 10:
+    if get_question_count(user["id"]) >= 10:
         return HTMLResponse("""
         <html>
           <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
             <h1>Daily limit reached</h1>
             <p>You have used 10 questions today.</p>
-            <p>Upgrade for more questions.</p>
+            <p>Your limit will reset tomorrow.</p>
             <a href="/pricing" style="color:#4f8cff;">View pricing</a>
           </body>
         </html>
         """)
 
-    question_count[user] = count + 1
+    connection = get_db()
+    cursor = connection.cursor()
 
-    docs = workspaces.get(user, [])
+    cursor.execute("""
+        SELECT id, name, text
+        FROM documents
+        WHERE user_id = ?
+    """, (user["id"],))
+
+    docs = cursor.fetchall()
+    connection.close()
 
     if not docs:
         answer = "Please upload documents first."
         sources = ""
     else:
-        words = question.lower().split()
-        matches = []
+        all_matches = []
 
         for doc in docs:
-            for line in doc["text"].split("\n"):
-                if any(word in line.lower() for word in words):
-                    matches.append({
-                        "file": doc["name"],
-                        "line": line
-                    })
+            matches = search_text(doc["text"], question)
 
-        if matches:
-            answer = "<br><br>".join(
-                f"<b>{m['file']}</b><br>{m['line']}" for m in matches[:5]
-            )
-            sources = "<br>".join(sorted(set(m["file"] for m in matches[:5])))
-        else:
-            answer = "I could not find a matching answer in your documents."
-            sources = ""
+            for match in matches:
+                all_matches.append(f"<b>{doc['name']}</b><br>{match}")
 
-    history = question_history.setdefault(user, [])
-    history.append(question)
+        answer = make_answer(all_matches)
+        sources = "<br>".join(sorted(set(doc["name"] for doc in docs)))
 
-    if len(history) > 10:
-        history.pop(0)
+    increase_question_count(user["id"])
+
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        INSERT INTO questions (user_id, question, answer, sources)
+        VALUES (?, ?, ?, ?)
+    """, (user["id"], question, answer, sources))
+
+    connection.commit()
+    connection.close()
 
     return f"""
     <html>
@@ -377,7 +655,7 @@ def privacy():
         <p>MAKK helps users upload documents and ask questions about them.</p>
 
         <h2>Information we collect</h2>
-        <p>We may collect your email address, password, uploaded document text, questions, and question history.</p>
+        <p>We may collect your email address, password hash, uploaded document text, questions, and question history.</p>
 
         <h2>How we use information</h2>
         <p>We use this information to provide MAKK services, answer questions, and improve the product.</p>
@@ -386,7 +664,7 @@ def privacy():
         <p>Documents you upload are used to answer your questions. Do not upload confidential or sensitive information unless you understand how it will be stored and used.</p>
 
         <h2>Data storage</h2>
-        <p>In the current demo version, data may be stored temporarily in application memory and may be lost when the service restarts.</p>
+        <p>MAKK currently stores data in a SQLite database on the application server.</p>
 
         <h2>Data deletion</h2>
         <p>You can delete uploaded documents from your workspace. You may also contact us to request account deletion.</p>
@@ -451,16 +729,16 @@ def security():
         <p>MAKK is designed to help teams work with their documents securely.</p>
 
         <h2>Current security practices</h2>
-        <p>MAKK uses login accounts to separate user workspaces. Documents and questions are associated with the logged-in user.</p>
+        <p>MAKK uses login accounts, password hashing, and session-based authentication to separate user workspaces.</p>
 
         <h2>Data handling</h2>
-        <p>In the current demo version, uploaded document text and user data may be stored temporarily in application memory.</p>
+        <p>MAKK currently stores uploaded document text, user accounts, and question history in a SQLite database on the application server.</p>
 
         <h2>Important notice</h2>
         <p>This is an early demo product. Do not upload highly confidential, financial, medical, legal, or other sensitive documents unless you understand the current limitations.</p>
 
         <h2>Security improvements</h2>
-        <p>We plan to improve password storage, data persistence, encryption, access controls, and audit logging.</p>
+        <p>We plan to improve encryption, access controls, audit logging, backups, and enterprise security controls.</p>
 
         <h2>Contact</h2>
         <p>For security questions, contact: security@makk.ai</p>
@@ -473,33 +751,96 @@ def security():
 
 @app.get("/delete/{doc_id}")
 def delete_document(request: Request, doc_id: int):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    if user in workspaces and 0 <= doc_id < len(workspaces[user]):
-        workspaces[user].pop(doc_id)
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT id, name
+        FROM documents
+        WHERE id = ? AND user_id = ?
+    """, (doc_id, user["id"]))
+
+    document = cursor.fetchone()
+    connection.close()
+
+    if not document:
+        return RedirectResponse(url="/workspace", status_code=303)
+
+    return f"""
+    <html>
+      <head>
+        <title>Delete document</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>Delete document?</h1>
+        <p>Are you sure you want to delete:</p>
+        <p><b>{document['name']}</b></p>
+
+        <a href="/confirm-delete/{document['id']}"
+           style="display:inline-block; padding:10px 18px; background:#ff6b6b; color:white; border-radius:8px; text-decoration:none;">
+            Yes, delete
+        </a>
+
+        <a href="/workspace"
+           style="display:inline-block; padding:10px 18px; background:#4f8cff; color:white; border-radius:8px; text-decoration:none;">
+            Cancel
+        </a>
+      </body>
+    </html>
+    """
+
+
+@app.get("/confirm-delete/{doc_id}")
+def confirm_delete(request: Request, doc_id: int):
+    user = get_current_user(request)
+
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        DELETE FROM documents
+        WHERE id = ? AND user_id = ?
+    """, (doc_id, user["id"]))
+
+    connection.commit()
+    connection.close()
 
     return RedirectResponse(url="/workspace", status_code=303)
 
 
 @app.get("/document/{doc_id}", response_class=HTMLResponse)
 def document_preview(request: Request, doc_id: int):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    docs = workspaces.get(user, [])
+    connection = get_db()
+    cursor = connection.cursor()
 
-    if doc_id < 0 or doc_id >= len(docs):
+    cursor.execute("""
+        SELECT id, name, text
+        FROM documents
+        WHERE id = ? AND user_id = ?
+    """, (doc_id, user["id"]))
+
+    doc = cursor.fetchone()
+    connection.close()
+
+    if not doc:
         return RedirectResponse(url="/workspace", status_code=303)
 
-    doc = docs[doc_id]
     lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
     preview = "<br>".join(lines[:15])
-    answer_html = ""
 
     return f"""
     <html>
@@ -516,7 +857,7 @@ def document_preview(request: Request, doc_id: int):
         <p>{preview}</p>
 
         <h2>Ask about this document</h2>
-        <form method="post" action="/document/{doc_id}/ask">
+        <form method="post" action="/document/{doc['id']}/ask">
             <input type="text" name="question" placeholder="Ask about this document" required
                    style="width:100%; padding:10px; margin:8px 0;">
             <button type="submit"
@@ -525,9 +866,7 @@ def document_preview(request: Request, doc_id: int):
             </button>
         </form>
 
-        {answer_html}
-
-        <a href="/document/{doc_id}/summary"
+        <a href="/document/{doc['id']}/summary"
            style="display:inline-block; padding:10px 18px; background:#22c55e; color:white; border-radius:8px; text-decoration:none;">
             Summarize
         </a>
@@ -540,35 +879,55 @@ def document_preview(request: Request, doc_id: int):
 
 @app.post("/document/{doc_id}/ask", response_class=HTMLResponse)
 def ask_document(request: Request, doc_id: int, question: str = Form(...)):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    docs = workspaces.get(user, [])
+    if get_question_count(user["id"]) >= 10:
+        return HTMLResponse("""
+        <html>
+          <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+            <h1>Daily limit reached</h1>
+            <p>You have used 10 questions today.</p>
+            <p>Your limit will reset tomorrow.</p>
+            <a href="/pricing" style="color:#4f8cff;">View pricing</a>
+          </body>
+        </html>
+        """)
 
-    if doc_id < 0 or doc_id >= len(docs):
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT id, name, text
+        FROM documents
+        WHERE id = ? AND user_id = ?
+    """, (doc_id, user["id"]))
+
+    doc = cursor.fetchone()
+    connection.close()
+
+    if not doc:
         return RedirectResponse(url="/workspace", status_code=303)
 
-    doc = docs[doc_id]
-    text = doc["text"]
-    lines = text.split("\n")
+    matches = search_text(doc["text"], question)
+    answer = make_answer(matches)
 
-    words = question.lower().split()
-    matches = []
+    increase_question_count(user["id"])
 
-    for line in lines:
-        line_lower = line.lower()
+    connection = get_db()
+    cursor = connection.cursor()
 
-        if any(word in line_lower for word in words if len(word) > 2):
-            matches.append(line.strip())
+    cursor.execute("""
+        INSERT INTO questions (user_id, question, answer, sources)
+        VALUES (?, ?, ?, ?)
+    """, (user["id"], question, answer, doc["name"]))
 
-    if matches:
-        answer = "<br>".join(matches[:10])
-    else:
-        answer = "No matching information found in this document."
+    connection.commit()
+    connection.close()
 
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
     preview = "<br>".join(lines[:15])
 
     answer_html = f"""
@@ -587,13 +946,13 @@ def ask_document(request: Request, doc_id: int, question: str = Form(...)):
       <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
         <h1>Document preview</h1>
         <p><b>File:</b> {doc['name']}</p>
-        <p><b>Words:</b> {len(text.split())}</p>
+        <p><b>Words:</b> {len(doc['text'].split())}</p>
 
         <h2>First 15 lines</h2>
         <p>{preview}</p>
 
         <h2>Ask about this document</h2>
-        <form method="post" action="/document/{doc_id}/ask">
+        <form method="post" action="/document/{doc['id']}/ask">
             <input type="text" name="question" placeholder="Ask about this document" required
                    style="width:100%; padding:10px; margin:8px 0;">
             <button type="submit"
@@ -612,24 +971,45 @@ def ask_document(request: Request, doc_id: int, question: str = Form(...)):
 
 @app.get("/document/{doc_id}/summary", response_class=HTMLResponse)
 def document_summary(request: Request, doc_id: int):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    docs = workspaces.get(user, [])
+    connection = get_db()
+    cursor = connection.cursor()
 
-    if doc_id < 0 or doc_id >= len(docs):
+    cursor.execute("""
+        SELECT id, name, text
+        FROM documents
+        WHERE id = ? AND user_id = ?
+    """, (doc_id, user["id"]))
+
+    doc = cursor.fetchone()
+    connection.close()
+
+    if not doc:
         return RedirectResponse(url="/workspace", status_code=303)
 
-    doc = docs[doc_id]
     lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
 
+    keywords = [
+        "প্রকল্প",
+        "সাক্ষাৎকার",
+        "প্রতিবেদক",
+        "তারিখ",
+        "শিক্ষার্থী",
+        "সৌরভ",
+        "project",
+        "interview",
+        "date",
+        "student"
+    ]
+
     important_lines = []
-    keywords = ["প্রকল্প", "সাক্ষাৎকার", "প্রতিবেদক", "তারিখ", "শিক্ষার্থী", "সৌরভ"]
 
     for line in lines:
-        if any(keyword in line for keyword in keywords):
+        if any(keyword in line.lower() for keyword in keywords):
             important_lines.append(line)
 
     if not important_lines:
@@ -652,12 +1032,12 @@ def document_summary(request: Request, doc_id: int):
             <p>{summary}</p>
         </div>
 
-        <a href="/document/{doc_id}/summary/download"
+        <a href="/document/{doc['id']}/summary/download"
            style="display:inline-block; padding:10px 18px; background:#4f8cff; color:white; border-radius:8px; text-decoration:none; margin-bottom:15px;">
             Download summary
         </a>
 
-        <a href="/document/{doc_id}" style="color:#4f8cff;">Back to document</a>
+        <a href="/document/{doc['id']}" style="color:#4f8cff;">Back to document</a>
       </body>
     </html>
     """
@@ -665,24 +1045,45 @@ def document_summary(request: Request, doc_id: int):
 
 @app.get("/document/{doc_id}/summary/download")
 def download_summary(request: Request, doc_id: int):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    docs = workspaces.get(user, [])
+    connection = get_db()
+    cursor = connection.cursor()
 
-    if doc_id < 0 or doc_id >= len(docs):
+    cursor.execute("""
+        SELECT id, name, text
+        FROM documents
+        WHERE id = ? AND user_id = ?
+    """, (doc_id, user["id"]))
+
+    doc = cursor.fetchone()
+    connection.close()
+
+    if not doc:
         return RedirectResponse(url="/workspace", status_code=303)
 
-    doc = docs[doc_id]
     lines = [line.strip() for line in doc["text"].split("\n") if line.strip()]
 
+    keywords = [
+        "প্রকল্প",
+        "সাক্ষাৎকার",
+        "প্রতিবেদক",
+        "তারিখ",
+        "শিক্ষার্থী",
+        "সৌরভ",
+        "project",
+        "interview",
+        "date",
+        "student"
+    ]
+
     important_lines = []
-    keywords = ["প্রকল্প", "সাক্ষাৎকার", "প্রতিবেদক", "তারিখ", "শিক্ষার্থী", "সৌরভ"]
 
     for line in lines:
-        if any(keyword in line for keyword in keywords):
+        if any(keyword in line.lower() for keyword in keywords):
             important_lines.append(line)
 
     if not important_lines:
@@ -701,11 +1102,42 @@ def download_summary(request: Request, doc_id: int):
 
 @app.get("/clear-history")
 def clear_history(request: Request):
-    user = request.cookies.get("makk_user")
+    user = get_current_user(request)
 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
-    question_history[user] = []
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        DELETE FROM questions
+        WHERE user_id = ?
+    """, (user["id"],))
+
+    connection.commit()
+    connection.close()
 
     return RedirectResponse(url="/workspace", status_code=303)
+
+
+@app.get("/logout")
+def logout(request: Request):
+    token = request.cookies.get("makk_session")
+
+    if token:
+        connection = get_db()
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            DELETE FROM sessions
+            WHERE token = ?
+        """, (token,))
+
+        connection.commit()
+        connection.close()
+
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie("makk_session")
+
+    return response
