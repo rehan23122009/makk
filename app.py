@@ -180,10 +180,29 @@ def make_answer(matches):
 
     return "<br><br>".join(matches[:10])
 
-
 @app.on_event("startup")
 def startup():
     init_db()
+
+    connection = get_db()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT id
+        FROM users
+        WHERE email = ?
+    """, ("demo@makk.ai",))
+
+    demo_user = cursor.fetchone()
+
+    if not demo_user:
+        cursor.execute("""
+            INSERT INTO users (email, password_hash)
+            VALUES (?, ?)
+        """, ("demo@makk.ai", hash_password("demo1234")))
+
+    connection.commit()
+    connection.close()
 
 
 @app.get("/", response_class=HTMLResponse)
