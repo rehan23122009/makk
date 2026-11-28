@@ -36,6 +36,14 @@ def home():
         <p>demo1234</p>
 
         <p style="margin-top:20px;"><a href="/signup" style="color:#4f8cff;">Create account</a></p>
+
+        <p style="margin-top:20px;">
+          <a href="/privacy" style="color:#4f8cff;">Privacy</a>
+          |
+          <a href="/terms" style="color:#4f8cff;">Terms</a>
+          |
+          <a href="/security" style="color:#4f8cff;">Security</a>
+        </p>
       </body>
     </html>
     """
@@ -174,7 +182,15 @@ def workspace(request: Request):
 
         {history_html}
 
-        <p style="margin-top:20px;"><a href="/pricing" style="color:#4f8cff;">View pricing</a></p>
+        <p style="margin-top:20px;">
+          <a href="/pricing" style="color:#4f8cff;">View pricing</a>
+          |
+          <a href="/privacy" style="color:#4f8cff;">Privacy</a>
+          |
+          <a href="/terms" style="color:#4f8cff;">Terms</a>
+          |
+          <a href="/security" style="color:#4f8cff;">Security</a>
+        </p>
       </body>
     </html>
     """
@@ -327,6 +343,114 @@ def pricing():
         <p>$19 / user / month</p>
         <p>Advanced AI</p>
         <p>Permissions and admin controls</p>
+
+        <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
+      </body>
+    </html>
+    """
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy():
+    return """
+    <html>
+      <head>
+        <title>MAKK Privacy Policy</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>Privacy Policy</h1>
+
+        <p>MAKK helps users upload documents and ask questions about them.</p>
+
+        <h2>Information we collect</h2>
+        <p>We may collect your email address, password, uploaded document text, questions, and question history.</p>
+
+        <h2>How we use information</h2>
+        <p>We use this information to provide MAKK services, answer questions, and improve the product.</p>
+
+        <h2>Document data</h2>
+        <p>Documents you upload are used to answer your questions. Do not upload confidential or sensitive information unless you understand how it will be stored and used.</p>
+
+        <h2>Data storage</h2>
+        <p>In the current demo version, data may be stored temporarily in application memory and may be lost when the service restarts.</p>
+
+        <h2>Data deletion</h2>
+        <p>You can delete uploaded documents from your workspace. You may also contact us to request account deletion.</p>
+
+        <h2>Contact</h2>
+        <p>For privacy questions, contact: support@makk.ai</p>
+
+        <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
+      </body>
+    </html>
+    """
+
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms():
+    return """
+    <html>
+      <head>
+        <title>MAKK Terms of Service</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>Terms of Service</h1>
+
+        <p>By using MAKK, you agree to these terms.</p>
+
+        <h2>Use of service</h2>
+        <p>You may use MAKK only for lawful purposes. Do not upload content you do not have permission to use.</p>
+
+        <h2>Account responsibility</h2>
+        <p>You are responsible for keeping your account password safe and for all activity under your account.</p>
+
+        <h2>Document ownership</h2>
+        <p>You retain ownership of documents you upload. You give MAKK permission to process those documents to provide answers and summaries.</p>
+
+        <h2>Accuracy</h2>
+        <p>MAKK may provide incomplete or incorrect information. Always verify important information from the original document.</p>
+
+        <h2>Service availability</h2>
+        <p>MAKK may change, pause, or stop the service at any time.</p>
+
+        <h2>Contact</h2>
+        <p>For questions, contact: support@makk.ai</p>
+
+        <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
+      </body>
+    </html>
+    """
+
+
+@app.get("/security", response_class=HTMLResponse)
+def security():
+    return """
+    <html>
+      <head>
+        <title>MAKK Security</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial; background:#0b1220; color:white; padding:20px;">
+        <h1>Security</h1>
+
+        <p>MAKK is designed to help teams work with their documents securely.</p>
+
+        <h2>Current security practices</h2>
+        <p>MAKK uses login accounts to separate user workspaces. Documents and questions are associated with the logged-in user.</p>
+
+        <h2>Data handling</h2>
+        <p>In the current demo version, uploaded document text and user data may be stored temporarily in application memory.</p>
+
+        <h2>Important notice</h2>
+        <p>This is an early demo product. Do not upload highly confidential, financial, medical, legal, or other sensitive documents unless you understand the current limitations.</p>
+
+        <h2>Security improvements</h2>
+        <p>We plan to improve password storage, data persistence, encryption, access controls, and audit logging.</p>
+
+        <h2>Contact</h2>
+        <p>For security questions, contact: security@makk.ai</p>
 
         <a href="/workspace" style="color:#4f8cff;">Back to workspace</a>
       </body>
@@ -560,6 +684,8 @@ def download_summary(request: Request, doc_id: int):
             "Content-Disposition": "attachment; filename=makk-summary.txt"
         }
     )
+
+
 @app.get("/clear-history")
 def clear_history(request: Request):
     user = request.cookies.get("makk_user")
